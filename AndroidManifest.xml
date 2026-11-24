@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Shows the "keymap detected" and "keymap active" notifications. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Lets the service look up other apps (to tell whether one is a game
+         and to read its name). Without it, Android 11 and newer hide them. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+    <application
+        android:allowBackup="false"
+        android:label="@string/gaming_keyboard_service_label"
+        android:supportsRtl="true">
+
+        <service
+            android:name="org.blissos.gamingkeyboard.GamingKeyboardService"
+            android:exported="true"
+            android:label="@string/gaming_keyboard_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/gaming_keyboard_service" />
+        </service>
+
+    </application>
+</manifest>
