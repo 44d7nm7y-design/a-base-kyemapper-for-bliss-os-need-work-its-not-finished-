@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="gaming_keyboard_service_label">Gaming Keyboard</string>
+    <string name="gaming_keyboard_service_description">Opens the Gaming Keyboard key mapper with your activation key while a game is open, and keeps your saved key mappings for each game.</string>
+</resources>

@@ -1,0 +1,51 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'org.blissos.gamingkeyboard'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'org.blissos.gamingkeyboard'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '0.1'
+
+        ndk {
+            // Bliss OS runs on PCs (x86_64); phones and tablets use arm64.
+            abiFilters 'arm64-v8a', 'x86_64'
+        }
+
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_shared'
+                cppFlags '-std=c++17'
+            }
+        }
+    }
+
+    // Use the folders as they are laid out in the project.
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = ['java']
+            res.srcDirs = ['res']
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path '../cpp_service/CMakeLists.txt'
+            version '3.22.1'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+// No extra libraries are needed: the code only uses what Android already includes.

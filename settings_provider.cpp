@@ -3,6 +3,9 @@
 #include "settings_provider.h"
 
 #include <algorithm>
+#include <vector>
+#include <string>
+#include <memory>
 
 namespace gaming_keyboard {
 
