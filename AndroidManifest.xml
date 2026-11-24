@@ -13,6 +13,19 @@
         android:label="@string/gaming_keyboard_service_label"
         android:supportsRtl="true">
 
+        <!-- The Gaming Keyboard settings screen. In the real Bliss OS build this
+             moves into Settings > Language & Input > Physical Keyboard. -->
+        <activity
+            android:name="org.blissos.gamingkeyboard.GamingKeyboardSettingsActivity"
+            android:exported="true"
+            android:label="@string/gaming_keyboard_service_label"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name="org.blissos.gamingkeyboard.GamingKeyboardService"
             android:exported="true"
