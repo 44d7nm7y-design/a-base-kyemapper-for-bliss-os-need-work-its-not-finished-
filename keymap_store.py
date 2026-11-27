@@ -9,6 +9,7 @@ service (see cpp_service/keymap_store.h/.cpp for the native equivalent).
 
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -23,6 +24,13 @@ DEFAULT_STORE_DIR = os.path.join(
     os.path.expanduser("~"), ".gaming_keyboard", "keymaps"
 )
 
+# Package names become file names, so only allow plain package characters.
+_SAFE_PACKAGE_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.]{0,254}$")
+
+
+def _is_safe_package_name(package_name: str) -> bool:
+    return bool(_SAFE_PACKAGE_RE.match(package_name)) and ".." not in package_name
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -34,16 +42,23 @@ def _path_for(package_name: str, store_dir: str = DEFAULT_STORE_DIR) -> str:
 
 
 def load_keymap(package_name: str, store_dir: str = DEFAULT_STORE_DIR) -> Optional[dict]:
-    """Return the saved keymap dict for a package, or None if not mapped yet."""
+    """Return the saved keymap dict for a package, or None if not mapped yet
+    (or if the file is damaged)."""
+    if not _is_safe_package_name(package_name):
+        return None
     path = _path_for(package_name, store_dir)
     if not os.path.exists(path):
         return None
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
 
 
-def new_keymap(package_name: str, display_name: str, activation_key: str = "F5") -> dict:
-    """Create a fresh in-memory keymap structure for a new mapping session."""
+def new_keymap(package_name: str, display_name: str, activation_key: str = "") -> dict:
+    """Create a fresh in-memory keymap structure for a new mapping session.
+    An empty activation_key means "use the global activation key"."""
     now = _now_iso()
     return {
         "schema_version": SCHEMA_VERSION,
@@ -82,17 +97,25 @@ def undo_last(keymap: dict) -> Optional[dict]:
 
 def save_keymap(keymap: dict, store_dir: str = DEFAULT_STORE_DIR) -> str:
     """Write the keymap to disk, overwriting any existing file for this
-    package (per the spec: re-saving replaces the older mapping)."""
+    package (per the spec: re-saving replaces the older mapping).
+    Writes to a temporary file first, so a crash mid-save can't destroy
+    the existing mapping."""
+    if not _is_safe_package_name(keymap["package_name"]):
+        raise ValueError(f"Unsafe package name: {keymap['package_name']!r}")
     keymap["updated_at"] = _now_iso()
     path = _path_for(keymap["package_name"], store_dir)
-    with open(path, "w", encoding="utf-8") as f:
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(keymap, f, indent=2)
+    os.replace(tmp_path, path)
     return path
 
 
 def delete_keymap_file(package_name: str, store_dir: str = DEFAULT_STORE_DIR) -> bool:
     """Remove a game's keymap entirely (Settings list 'delete' action).
     Returns True if a file was actually removed."""
+    if not _is_safe_package_name(package_name):
+        return False
     path = _path_for(package_name, store_dir)
     if os.path.exists(path):
         os.remove(path)
@@ -107,11 +130,15 @@ def list_mapped_games(store_dir: str = DEFAULT_STORE_DIR) -> list:
         return []
     games = []
     for fname in os.listdir(store_dir):
-        if fname.endswith(".json"):
+        if not fname.endswith(".json"):
+            continue
+        try:
             with open(os.path.join(store_dir, fname), "r", encoding="utf-8") as f:
                 data = json.load(f)
-                games.append({
-                    "package_name": data["package_name"],
-                    "display_name": data["display_name"],
-                })
+            games.append({
+                "package_name": data["package_name"],
+                "display_name": data.get("display_name", data["package_name"]),
+            })
+        except (OSError, ValueError, KeyError):
+            continue  # one damaged file shouldn't empty the whole list
     return games

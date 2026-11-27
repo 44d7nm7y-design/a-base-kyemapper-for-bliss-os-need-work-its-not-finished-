@@ -36,6 +36,7 @@ public:
     virtual ~NotifierInterface() = default;
     virtual void ShowKeymapDetected(const std::string& display_name) = 0;
     virtual void ShowOverlayActive(const std::string& display_name) = 0;
+    virtual void ClearOverlayActive() = 0;
 };
 
 class GameDetector {
@@ -58,7 +59,8 @@ public:
     void OnPackageForegrounded(const std::string& package_name);
 
     // Call this when the foreground app changes away from a mapped
-    // game, so the activation key stops being armed for it.
+    // game, so the activation key stops being armed for it and the
+    // "active" notification is removed.
     void OnPackageBackgrounded(const std::string& package_name);
 
     // Returns the package_name currently armed for overlay activation,

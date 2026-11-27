@@ -1,19 +1,18 @@
 // keymap_store.cpp
 //
 // Implementation of KeymapStore. Uses nlohmann::json (header-only,
-// https://github.com/nlohmann/json) for parsing — swap for whatever
-// JSON library the Bliss OS build already depends on if there's a
-// preferred one; the schema itself (docs/FILE_FORMAT.md) doesn't
-// require this specific library.
+// https://github.com/nlohmann/json) for parsing.
 
 #include "keymap_store.h"
 
+#include <chrono>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
-#include <chrono>
+#include <iomanip>
 #include <random>
 #include <sstream>
-#include <iomanip>
+#include <system_error>
 
 #include <nlohmann/json.hpp>
 
@@ -23,6 +22,18 @@ using json = nlohmann::json;
 namespace gaming_keyboard {
 
 namespace {
+
+// Package names become file names, so only allow plain package characters.
+bool IsSafePackageName(const std::string& s) {
+    if (s.empty() || s.size() > 255 || s.front() == '.') return false;
+    if (s.find("..") != std::string::npos) return false;
+    for (char c : s) {
+        bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                  (c >= '0' && c <= '9') || c == '.' || c == '_';
+        if (!ok) return false;
+    }
+    return true;
+}
 
 std::string NowIso8601() {
     auto now = std::chrono::system_clock::now();
@@ -36,7 +47,7 @@ std::string NowIso8601() {
 
 std::string GenerateShortId() {
     static const char kChars[] = "0123456789abcdef";
-    static std::mt19937 rng{std::random_device{}()};
+    static thread_local std::mt19937 rng{std::random_device{}()};
     std::uniform_int_distribution<int> dist(0, 15);
     std::string id(4, '0');
     for (auto& c : id) c = kChars[dist(rng)];
@@ -94,7 +105,7 @@ Keymap KeymapFromJson(const json& j) {
     k.display_name = j.value("display_name", k.package_name);
     k.created_at = j.value("created_at", "");
     k.updated_at = j.value("updated_at", "");
-    k.activation_key = j.value("activation_key", "F5");
+    k.activation_key = j.value("activation_key", "");  // empty = use global key
     if (j.contains("mappings")) {
         for (const auto& item : j.at("mappings")) {
             k.mappings.push_back(MappingFromJson(item));
@@ -106,7 +117,8 @@ Keymap KeymapFromJson(const json& j) {
 }  // namespace
 
 KeymapStore::KeymapStore(std::string store_dir) : store_dir_(std::move(store_dir)) {
-    fs::create_directories(store_dir_);
+    std::error_code ec;
+    fs::create_directories(store_dir_, ec);
 }
 
 std::string KeymapStore::PathFor(const std::string& package_name) const {
@@ -114,15 +126,20 @@ std::string KeymapStore::PathFor(const std::string& package_name) const {
 }
 
 std::optional<Keymap> KeymapStore::Load(const std::string& package_name) const {
+    if (!IsSafePackageName(package_name)) return std::nullopt;
     auto path = PathFor(package_name);
     if (!fs::exists(path)) return std::nullopt;
 
     std::ifstream in(path);
     if (!in) return std::nullopt;
 
-    json j;
-    in >> j;
-    return KeymapFromJson(j);
+    try {
+        json j;
+        in >> j;
+        return KeymapFromJson(j);
+    } catch (const std::exception&) {
+        return std::nullopt;  // damaged file: treat as unmapped, don't crash
+    }
 }
 
 Keymap KeymapStore::CreateNew(const std::string& package_name,
@@ -159,17 +176,28 @@ bool KeymapStore::UndoLast(Keymap& keymap) {
 }
 
 std::string KeymapStore::Save(Keymap& keymap) const {
+    if (!IsSafePackageName(keymap.package_name)) return "";
     keymap.updated_at = NowIso8601();
     auto path = PathFor(keymap.package_name);
-    std::ofstream out(path);
-    out << KeymapToJson(keymap).dump(2);
+    auto tmp = path + ".tmp";
+    {
+        std::ofstream out(tmp);
+        out << KeymapToJson(keymap).dump(2, ' ', false, json::error_handler_t::replace);
+        out.flush();
+        if (!out) return "";
+    }
+    std::error_code ec;
+    fs::rename(tmp, path, ec);  // replaces the old file in one step
+    if (ec) return "";
     return path;
 }
 
 bool KeymapStore::DeleteFile(const std::string& package_name) const {
+    if (!IsSafePackageName(package_name)) return false;
     auto path = PathFor(package_name);
     if (!fs::exists(path)) return false;
-    return fs::remove(path);
+    std::error_code ec;
+    return fs::remove(path, ec);
 }
 
 std::vector<GameListing> KeymapStore::ListMappedGames() const {
@@ -182,12 +210,16 @@ std::vector<GameListing> KeymapStore::ListMappedGames() const {
         std::ifstream in(entry.path());
         if (!in) continue;
 
-        json j;
-        in >> j;
-        GameListing g;
-        g.package_name = j.value("package_name", "");
-        g.display_name = j.value("display_name", g.package_name);
-        result.push_back(g);
+        try {
+            json j;
+            in >> j;
+            GameListing g;
+            g.package_name = j.value("package_name", "");
+            g.display_name = j.value("display_name", g.package_name);
+            if (!g.package_name.empty()) result.push_back(g);
+        } catch (const std::exception&) {
+            continue;  // one damaged file shouldn't empty the whole list
+        }
     }
     return result;
 }

@@ -3,11 +3,39 @@
 #include "settings_provider.h"
 
 #include <algorithm>
-#include <vector>
-#include <string>
-#include <memory>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <system_error>
+#include <utility>
+
+namespace fs = std::filesystem;
 
 namespace gaming_keyboard {
+
+namespace {
+
+const char kActivationKeyName[] = "activation_key";
+const char kDefaultActivationKey[] = "F5";
+
+std::map<std::string, std::string> ReadAll(const std::string& path) {
+    std::map<std::string, std::string> out;
+    std::ifstream in(path);
+    std::string line;
+    while (std::getline(in, line)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos || eq == 0) continue;
+        out[line.substr(0, eq)] = line.substr(eq + 1);
+    }
+    return out;
+}
+
+bool IsAllowedKey(const std::string& key) {
+    const auto& allowed = AllowedActivationKeys();
+    return std::find(allowed.begin(), allowed.end(), key) != allowed.end();
+}
+
+}  // namespace
 
 const std::vector<std::string>& AllowedActivationKeys() {
     static const std::vector<std::string> keys = {
@@ -17,8 +45,35 @@ const std::vector<std::string>& AllowedActivationKeys() {
     return keys;
 }
 
-SettingsProvider::SettingsProvider(std::shared_ptr<KeymapStore> store)
-    : store_(std::move(store)) {}
+FileSettingsStorage::FileSettingsStorage(std::string file_path)
+    : file_path_(std::move(file_path)) {}
+
+std::string FileSettingsStorage::Get(const std::string& key,
+                                     const std::string& default_value) const {
+    auto all = ReadAll(file_path_);
+    auto it = all.find(key);
+    return it == all.end() ? default_value : it->second;
+}
+
+bool FileSettingsStorage::Set(const std::string& key, const std::string& value) {
+    auto all = ReadAll(file_path_);
+    all[key] = value;
+
+    auto tmp = file_path_ + ".tmp";
+    {
+        std::ofstream out(tmp);
+        for (const auto& [k, v] : all) out << k << '=' << v << '\n';
+        out.flush();
+        if (!out) return false;
+    }
+    std::error_code ec;
+    fs::rename(tmp, file_path_, ec);  // replaces the old file in one step
+    return !ec;
+}
+
+SettingsProvider::SettingsProvider(std::shared_ptr<KeymapStore> store,
+                                   std::shared_ptr<SettingsStorage> storage)
+    : store_(std::move(store)), storage_(std::move(storage)) {}
 
 std::vector<GameListing> SettingsProvider::GetMappedGamesList() const {
     return store_->ListMappedGames();
@@ -29,16 +84,20 @@ bool SettingsProvider::RemoveGame(const std::string& package_name) {
 }
 
 std::string SettingsProvider::GetGlobalActivationKey() const {
-    return global_activation_key_;
+    std::string key = storage_->Get(kActivationKeyName, kDefaultActivationKey);
+    return IsAllowedKey(key) ? key : kDefaultActivationKey;  // ignore a damaged value
 }
 
 bool SettingsProvider::SetGlobalActivationKey(const std::string& key) {
-    const auto& allowed = AllowedActivationKeys();
-    if (std::find(allowed.begin(), allowed.end(), key) == allowed.end()) {
-        return false;  // reject keys outside F1-F9 / 1-9
+    if (!IsAllowedKey(key)) return false;  // reject anything outside F1-F9 / 1-9
+    return storage_->Set(kActivationKeyName, key);
+}
+
+std::string SettingsProvider::EffectiveActivationKey(const Keymap& keymap) const {
+    if (!keymap.activation_key.empty() && IsAllowedKey(keymap.activation_key)) {
+        return keymap.activation_key;
     }
-    global_activation_key_ = key;
-    return true;
+    return GetGlobalActivationKey();
 }
 
 }  // namespace gaming_keyboard

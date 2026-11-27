@@ -1,141 +1,112 @@
 # Gaming Keyboard — Bliss OS Key Mapper
 
-A system-level key mapping tool proposed for Bliss OS, designed by Shad.
-Idea, UX, and behavior spec by Shad; this repo contains a tested Python
-prototype of the overlay/UX plus a C++ skeleton for the real system
-service, meant as a starting point for native integration.
+A system-level key mapping tool for Bliss OS / Android-x86, designed by Shad.
+It lets a user place virtual key controls on screen for games that have no
+native keyboard and mouse support, and it keeps those mappings outside the
+game's app data, so they survive uninstalling and reinstalling the game.
 
-## What this is (and isn't)
+**Status: first complete draft, never compiled and never run on a device.**
+Expect small build errors on the first build. See "What still needs testing".
 
-**Is:** an overlay-based tool that lets a user manually place virtual
-key/mouse controls on screen for games that don't have native keyboard
-and mouse support, with mappings persisted at the system level so they
-survive uninstalling and reinstalling the game.
+## What it is (and isn't)
 
-**Isn't:** a tool that automatically detects or handles games that
-*already* have native keyboard/mouse support built in (e.g. Delta
-Force, Call of Duty Mobile). Those are explicitly out of scope — if
-someone wants to build that on top of this, it's a separate project.
+**Is:** an overlay-based mapper. In a game you press the activation key, a
+translucent "Gaming Keyboard" overlay appears, and you place keys on the
+screen. While the game is open, pressing a mapped key taps that spot.
 
-## How it should feel to a user
+**Isn't:** a tool for games that already support keyboard and mouse natively
+(for example Delta Force or Call of Duty Mobile). Those are out of scope and
+would be a separate project.
 
-1. Settings → Language & Input → Physical Keyboard → **Gaming
-   Keyboard**. This shows every game with a saved mapping (styled like
-   a "devices you're signed into" list) and lets you set the global
-   activation key (F1–F9 or 1–9).
-2. In a game, press the activation key. A translucent, recorder-style
-   overlay titled **"Gaming Keyboard"** appears with three buttons —
-   **Undo**, **Delete**, **Save** — and a red **✕** to close without
-   doing anything.
-3. Click empty space + press a key → places a key mapping there. Drag
-   the overlay to reposition it. Double-click the overlay's center →
-   arms mouse-mapping mode.
-4. Click an already-placed mapping to re-arm it (it flashes/highlights
-   to confirm selection), then press a new key to reassign it.
-5. **Undo** removes the last mapping made this session. **Delete**
-   discards the whole session without saving. **Save** writes the
-   mapping to a file named for the game, replacing any older mapping
-   for that game, and closes the overlay.
-6. Uninstall the game — the mapping file is untouched (it lives outside
-   the app's sandbox). Reinstall it — the tool detects the package
-   automatically and shows a notification that the keymap is active
-   again.
+## How it works for the user
 
-## Repo layout
+1. Settings > Language & Input > Physical Keyboard > **Gaming Keyboard** lists
+   every game with a saved mapping, lets you delete one, and lets you choose
+   the global activation key (F1-F9 or 1-9, default F5).
+2. In a game, press the activation key. The overlay opens with **Undo**,
+   **Delete**, **Save** and a red **X** (close without saving).
+3. Tap empty space, then press a key: that key is mapped to that spot.
+   Double-tap empty space for a mouse-click mapping.
+4. Tap an existing mapping to select it (it pulses), then press a new key to
+   change it. Drag a mapping to move it. Drag the panel out of the way.
+5. **Undo** removes the last mapping of the session. **Delete** discards the
+   session without saving. **Save** writes the game's file, replacing any
+   older one, and closes the overlay.
+6. Uninstall the game: its file is untouched. Reinstall it: a notification
+   says the keymap was detected, and the mapping works again.
+
+## How it is built
+
+| Part | Files | Job |
+|---|---|---|
+| Storage | `keymap_store`, `settings_provider` (C++) | One JSON file per game, atomic saves, global activation key |
+| Detection | `game_detector` (C++) | Matches installed or foreground apps against saved keymaps |
+| Bridge | `keymap_jni.cpp`, `detector_jni.cpp`, `KeymapNative`, `GameDetectorNative` | Lets Java call the C++ code |
+| Launcher | `GamingKeyboardService` | Accessibility service: foreground tracking, activation key, install events |
+| Overlay | `GamingKeyboardOverlay` | The translucent mapping window (positions are saved in screen pixels) |
+| Engine | `GamingKeyboardEngine` | Turns a mapped key press into a tap, using accessibility gesture dispatch |
+| Notifications | `GamingKeyboardNotifier` | "Keymap detected" and "Keymap active" |
+| Settings screen | `GamingKeyboardSettingsActivity` | Game list, delete, activation key picker |
+
+The file format is described in `docs/FILE_FORMAT.md`. The Python files in
+`python_prototype/` are a desktop demo of the interaction model and are not
+part of the Android build.
+
+## Folder layout
 
 ```
-docs/
-  FILE_FORMAT.md        <- the JSON schema BOTH implementations share
-python_prototype/
-  keymap_store.py        <- read/write logic (tested, see below)
-  overlay.py              <- runnable Tkinter overlay prototype
-  settings_list.py        <- runnable Settings > Gaming Keyboard list prototype
-cpp_service/
-  keymap_store.h/.cpp     <- native storage manager (mirrors keymap_store.py)
-  game_detector.h/.cpp    <- install/foreground detection + notifications
-  settings_provider.h/.cpp<- backing data for the Settings list screen
+docs/FILE_FORMAT.md
+python_prototype/        keymap_store.py, overlay.py, settings_list.py
+cpp_service/             CMakeLists.txt, keymap_store, game_detector,
+                         settings_provider, keymap_jni.cpp, detector_jni.cpp,
+                         third_party/nlohmann/json.hpp
+android/                 AndroidManifest.xml, build.gradle
+android/java/org/blissos/gamingkeyboard/   all .java files
+android/res/xml/         gaming_keyboard_service.xml
+android/res/values/      strings.xml
+reference_xtmapper/      other project's files, for reference only, not built
 ```
 
-## Why both Python and C++
+## Building
 
-The Python prototype is a **testable reference implementation** of the
-interaction model — drag, click-to-place, double-click for mouse,
-undo/save/delete/close — so the exact behavior can be demoed and
-refined without touching native code. It's already been run and its
-storage logic unit-tested (see below).
+1. Download `json.hpp` (nlohmann/json, version 3.11.x) from the project's
+   GitHub releases and save it at `cpp_service/third_party/nlohmann/json.hpp`.
+2. Open the `android` module in Android Studio (or the Bliss OS build system).
+3. The Java package `org.blissos.gamingkeyboard` is a placeholder. If it is
+   renamed, the function names in the two JNI `.cpp` files must change too.
 
-The C++ skeleton is the **starting point for the real system
-integration** — it can't be fully tested standalone here since it
-needs Bliss OS/AOSP hooks (PackageManager, ActivityManager or an
-accessibility service, and the actual overlay window APIs), but the
-storage and detection *logic* is fully written out and structured so
-whoever integrates it isn't starting from a blank file.
+## What still needs testing
 
-## What's already working vs. what's left to wire up
+- The first build. Nothing has been compiled yet.
+- Whether the overlay receives physical keyboard presses on a real Bliss OS
+  device, and whether Esc arrives as Back (Back closes the overlay).
+- Whether tap injection works in real games.
 
-**Done and tested:**
-- Keymap file format (`docs/FILE_FORMAT.md`) — JSON, keyed by package
-  name, versioned schema.
-- Python `keymap_store.py` — create/load/save/undo/delete/list. Ran a
-  full round-trip test successfully (create → save → load → undo →
-  list → delete).
-- Python `overlay.py` — full interaction model: window drag, click-to-
-  place + key capture, double-click for mouse mapping, click-to-
-  reassign with visual confirmation, Undo/Delete/Save/Close buttons.
-  Syntax-verified, ready to run with `python3 overlay.py <package> "<name>"`.
-- Python `settings_list.py` — the Gaming Keyboard list screen with
-  per-row delete and an activation-key dropdown (F1–F9, 1–9).
-- C++ `KeymapStore` — mirrors the Python storage logic exactly, same
-  file format. Uses `nlohmann::json` (header-only; not vendored in
-  this repo — add it via your existing dependency manager, or drop in
-  `json.hpp` directly).
-- C++ `GameDetector` — matching/notification logic for install and
-  foreground events, built against an abstract `NotifierInterface` so
-  it isn't tied to a specific notification API yet.
-- C++ `SettingsProvider` — backing data (list + activation-key
-  get/set) for the Settings screen, framework-agnostic.
+## Known limits of this version
 
-**Left for the Bliss OS/AOSP integrator:**
-- Wiring `GameDetector::OnPackageInstalled` /
-  `OnPackageForegrounded` / `OnPackageBackgrounded` to real system
-  events (PackageManager broadcast receivers; ActivityManager,
-  UsageStatsManager, or an accessibility service for foreground
-  detection — ideally whichever pattern the existing native features,
-  like Wi-Fi, already use, for consistency).
-- Implementing `NotifierInterface` against Bliss OS's actual
-  notification system.
-- Building the real translucent system overlay window (Android
-  `TYPE_ACCESSIBILITY_OVERLAY` or similar) — the Python `overlay.py`
-  is the interaction reference, not something that runs natively.
-- Binding `SettingsProvider` into an actual Settings UI screen
-  (PreferenceFragment or whatever Bliss OS's Settings app uses).
-- Choosing the real system storage path (spec assumes something like
-  `/data/system/gaming_keyboard/keymaps/`) and permissions so it's
-  writable by the service but outside any single app's sandbox.
-- Global hardware key capture for the activation key (F1–F9 / 1–9),
-  independent of whatever app is in the foreground.
+- Taps only. Holding a key does not hold a finger down, so there is no
+  joystick, swipe or drag, and no mouse-look.
+- Mouse-type mappings are saved but do nothing yet. Accessibility services
+  cannot see mouse clicks.
+- Saved positions are screen pixels, so a layout made in one orientation or
+  resolution will not line up in another.
+- The activation key opens the overlay only in apps Android marks as games,
+  or in games that already have a keymap.
 
-> **Note on privilege level:** capturing a global hardware key while
-> another app is in the foreground isn't something a normal
-> third-party Android app can do — it requires either an
-> AccessibilityService or a privileged/system-signed component. Since
-> this is meant to ship as a native Bliss OS feature (not a sideloaded
-> app), that's the right tier to build it at, but it's worth flagging
-> explicitly for whoever picks this up so it's scoped as system-level
-> work from the start, not bolted on later.
+## For the Bliss OS integrator
 
-## Try the prototype yourself
+- Run it as a platform-signed system app. Storage is under
+  `/data/system/gaming_keyboard/` and needs the right permissions and
+  SELinux labels. For a test on an ordinary device, change the two
+  `DEFAULT_` paths at the top of `KeymapNative.java` to a folder the app owns.
+- Enable the accessibility service by default so users never see a prompt.
+- Move the settings screen into Settings > Language & Input > Physical
+  Keyboard. The screen only uses `KeymapNative` calls, which can be reused.
+- Mouse mappings, holds, swipes and joystick control need a lower-level path,
+  such as a virtual touchscreen through uinput. That is the main next step.
 
-```bash
-cd python_prototype
+## Credits and license
 
-# Open the settings list (empty at first)
-python3 settings_list.py
-
-# Map a game — opens the overlay
-python3 overlay.py com.kiloo.subwaysurf "Subway Surfers"
-# click empty space, press a key, click Save
-
-# Reopen settings list — "Subway Surfers" now appears
-python3 settings_list.py
-```
+Idea, UX and behavior spec by Shad. Files in `reference_xtmapper/` come from
+another open-source mapper and are kept only for reference; they follow that
+project's own license and are not part of the build.

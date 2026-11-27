@@ -1,47 +1,68 @@
 // settings_provider.h
 //
 // Backing logic for Settings > Language & Input > Physical Keyboard >
-// Gaming Keyboard. This is intentionally UI-framework-agnostic: it
-// exposes plain data (a list of games, a get/set for the global
-// activation key) that the integrator binds to whatever Bliss OS uses
-// for its Settings screens (likely a PreferenceFragment / Settings
-// list item, matching how the existing Wi-Fi section is built).
+// Gaming Keyboard. UI-framework-agnostic: plain data in, plain data out.
+// The global activation key is persisted through SettingsStorage, so the
+// integrator can swap the file-based version below for Android's real
+// settings provider without touching this class.
 
 #pragma once
 
+#include <memory>
 #include <string>
 #include <vector>
-#include <memory>
 
 #include "keymap_store.h"
 
 namespace gaming_keyboard {
 
-// Keys allowed for the global activation key preference, per spec:
-// F1-F9 and 1-9.
+// Keys allowed for the global activation key: F1-F9 and 1-9.
 const std::vector<std::string>& AllowedActivationKeys();
+
+// Where small settings live between restarts.
+class SettingsStorage {
+public:
+    virtual ~SettingsStorage() = default;
+    virtual std::string Get(const std::string& key,
+                            const std::string& default_value) const = 0;
+    virtual bool Set(const std::string& key, const std::string& value) = 0;
+};
+
+// Simple key=value file. Works anywhere, including desktop tests.
+// Suggested path: /data/system/gaming_keyboard/settings.conf
+class FileSettingsStorage : public SettingsStorage {
+public:
+    explicit FileSettingsStorage(std::string file_path);
+    std::string Get(const std::string& key,
+                    const std::string& default_value) const override;
+    bool Set(const std::string& key, const std::string& value) override;
+
+private:
+    std::string file_path_;
+};
 
 class SettingsProvider {
 public:
-    explicit SettingsProvider(std::shared_ptr<KeymapStore> store);
+    SettingsProvider(std::shared_ptr<KeymapStore> store,
+                     std::shared_ptr<SettingsStorage> storage);
 
-    // For the Gaming Keyboard list screen: one row per mapped game.
+    // One row per mapped game, for the Gaming Keyboard list screen.
     std::vector<GameListing> GetMappedGamesList() const;
 
-    // "Delete" action on a list row — removes that game's keymap file
-    // entirely. Returns true if something was actually deleted.
+    // "Delete" on a list row: removes that game's keymap file.
     bool RemoveGame(const std::string& package_name);
 
-    // Global activation key (default overlay-launch key when a game
-    // doesn't specify its own). Persisted separately from per-game
-    // keymap files, e.g. in Bliss OS's standard SharedPreferences /
-    // system settings provider — storage mechanism left to integrator.
+    // Global activation key. Survives restarts. Defaults to F5.
     std::string GetGlobalActivationKey() const;
     bool SetGlobalActivationKey(const std::string& key);
 
+    // The key that actually opens the overlay for this game: the game's
+    // own key if it has one, otherwise the global key.
+    std::string EffectiveActivationKey(const Keymap& keymap) const;
+
 private:
     std::shared_ptr<KeymapStore> store_;
-    std::string global_activation_key_ = "F5";
+    std::shared_ptr<SettingsStorage> storage_;
 };
 
 }  // namespace gaming_keyboard

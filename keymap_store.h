@@ -48,7 +48,7 @@ struct Keymap {
     std::string display_name;    // cosmetic, shown in Settings list
     std::string created_at;      // ISO-8601 UTC
     std::string updated_at;      // ISO-8601 UTC
-    std::string activation_key;  // e.g. "F5"; falls back to global default if empty
+    std::string activation_key;  // e.g. "F5"; empty = use the global activation key
     std::vector<MappingEntry> mappings;
 };
 
@@ -67,14 +67,15 @@ public:
     explicit KeymapStore(std::string store_dir);
 
     // Returns the saved keymap for a package, or std::nullopt if the
-    // game has never been mapped.
+    // game has never been mapped (or its file is damaged).
     std::optional<Keymap> Load(const std::string& package_name) const;
 
     // Creates a fresh, empty in-memory keymap for a new mapping session.
     // Does not write to disk until Save() is called.
+    // activation_key is empty by default, meaning "use the global key".
     Keymap CreateNew(const std::string& package_name,
                       const std::string& display_name,
-                      const std::string& activation_key = "F5") const;
+                      const std::string& activation_key = "") const;
 
     // Appends a mapping entry to the in-memory keymap and returns the
     // generated id (for undo tracking). Does not write to disk.
@@ -90,12 +91,12 @@ public:
 
     // Writes the keymap to disk, overwriting any existing file for this
     // package_name in full (re-saving always replaces, per spec).
-    // Returns the path written to.
+    // Returns the path written to, or an empty string if saving failed.
     std::string Save(Keymap& keymap) const;
 
-    // Removes a game's keymap file entirely (used both by the in-overlay
-    // "Delete" — which discards an unsaved session and never calls this —
-    // and by the Settings-list delete action, which does call this).
+    // Removes a game's keymap file entirely (used by the Settings-list
+    // delete action; the in-overlay "Delete" only discards an unsaved
+    // session and never calls this).
     bool DeleteFile(const std::string& package_name) const;
 
     // Lists every game that currently has a saved keymap, for the
